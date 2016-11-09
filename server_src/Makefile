@@ -1,7 +1,7 @@
-all: myftpd
+all: myfrmd
 
-myftpd: myftpd.c
-	gcc myftpd.c -o myftpd -lmhash
+myfrmd: myfrmd.c
+	gcc myfrmd.c -o myfrmd
 
 clean:
-	myftpd
+	myfrmd
