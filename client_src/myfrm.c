@@ -238,7 +238,7 @@ int create(int s_udp, struct sockaddr_in sin2){
     socklen_t len = sizeof(struct sockaddr_in); 
     
     bzero(buf, sizeof(buf));
-    printf("What is the name of the board you would like to send?\n");
+    printf("What is the name of the board you would like to create?\n");
     scanf("%s", buf); 
 
     //send name of the board (string)
@@ -264,11 +264,12 @@ int message(int s_udp, struct sockaddr_in sin2){
     int send_val; //send number of bytes
     char buf[MAX_BUFFER];
     socklen_t len = sizeof(struct sockaddr_in);
+    char dummy_char; //soak in newline char
 
     bzero(buf, sizeof(buf));
     printf("What is the name of the board you would like to leave a message on\n");
     scanf("%s", buf);
-
+    dummy_char = getc(stdin);
     //send name of the board
     if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
         printf("Error with sending name of board to server\n");
@@ -277,6 +278,13 @@ int message(int s_udp, struct sockaddr_in sin2){
 
     bzero(buf, sizeof(buf));
     printf("What is the message you would like to send?\n");
+    fgets(buf, sizeof(buf), stdin);
+    
+    //remove trailing newline
+    char *pos;
+    if ((pos = strchr(buf, '\n')) !=NULL){
+        *pos = '\0';
+    }
 
     //send message to server
     if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
@@ -335,4 +343,50 @@ int delete(int s_udp, struct sockaddr_in sin2){
     return 0;
 }
 
+int edit(int s_udp, struct sockaddr_in sin2){
 
+    int rec_bytes; //number of bytes received
+    int send_val; //send number of bytes
+    char buf[MAX_BUFFER];
+    socklen_t len = sizeof(struct sockaddr_in);
+    char dummy_char; //soak in newline char
+
+    bzero(buf, sizeof(buf));
+    printf("What is the name of the board you would like to send?\n");
+    scanf("%s", buf);
+    dummy_char = getc(stdin);
+
+    //send name of the board
+    if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error with sending name of board to server\n");
+        return -1;
+    }
+
+    short int message_id;
+    printf("What is the message you would like to edit (ID number)?\n");
+    scanf("%i", message_id);
+
+    //send message id (short int) to server
+    message_id = htons(message_id);
+
+    if((send_val = sendto(s_udp, &message_id, sizeof(short int),0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error with sending message id to the server\n");
+        return -1;
+    }
+
+    //send new message to be used
+    bzero(buf, sizeof(buf));
+    printf("What is the edited message you would like to send?\n");
+    fgets(buf, sizeof(buf), stdin);
+
+    //remove trailing newline
+    char *pos;
+    if ((pos = strchr(buf, '\n')) !=NULL){
+        *pos = '\0';
+    }
+
+    if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error sending message to the server\n");
+        return -1;
+    } 
+}
