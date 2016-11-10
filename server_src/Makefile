@@ -1,7 +1,7 @@
 all: myfrmd
 
-myfrmd: myfrmd.c
-	gcc myfrmd.c -o myfrmd
+myfrmd: myfrmd.cpp
+	g++ -std=c++11 myfrmd.cpp -o myfrmd
 
 clean:
-	myfrmd
+	rm myfrmd
