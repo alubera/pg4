@@ -115,19 +115,10 @@ int main(int argc, const char* argv[]){
         //carry out the function
         if(!strcmp(operation_buf, "CRT")){
             
-
-            printf("What is the name of the board you would like to send?\n");
-            scanf("%s", buf);
-            
-            //send name of the board (string) 
-            if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
-                printf("Error with sending name of board to server\n");
+            if (create(s_udp, sin2) < 0){
+                printf("CRT operation failed\n");
                 exit(1);
-            }
-            
-            //receive string from server and print results
-            
-            
+            }    
 
         } else if (!strcmp(operation_buf, "LIS")){
 
@@ -244,4 +235,29 @@ int authentication(int s){
     return success;
 }
 
-             
+int create(int s_udp, struct sockaddr_in sin2){
+
+    int rec_bytes; //number of bytes received
+    int send_val; //send number of bytes
+    char buf[MAX_BUFFER];   
+    socklen_t len = sizeof(struct sockaddr_in); 
+    
+    bzero(buf, sizeof(buf));
+    printf("What is the name of the board you would like to send?\n");
+    scanf("%s", buf); 
+
+    //send name of the board (string)
+    if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error with sending name of board to server\n");
+        return -1;
+    }
+
+    bzero(buf, sizeof(buf));
+    //receive string from server and print results
+    if((rec_bytes = recvfrom(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, &len)) < 0){
+        printf("Error with receiving string from server\n");
+        return -1;
+    }
+
+    return 0;
+}
