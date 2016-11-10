@@ -26,7 +26,6 @@
 #include <netdb.h>
 #include <dirent.h>
 #include <string>
-#include <unordered_set>
 #include <unordered_map>
 #define MAX_BUFFER 4096
 #define MAX_PENDING 0
@@ -89,7 +88,7 @@ short int getuser(unordered_map<string,string> &users, const int s, string &user
    }
 }
 
-int op_crt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_set<string> &boards, string user) {
+int op_crt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user) {
    /***********************
     *  CRT OPERATION
     ***********************/
@@ -115,12 +114,54 @@ int op_crt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
       return -1;
    } else {
       // add board to boards set
-      boards.insert(bname);
+      boards[bname] = 0;
    }
 
    // open file stream and write first line
    outfile.open(bname.c_str());
    outfile << user << endl;
+
+   // close file when done
+   outfile.close();
+   return 0;
+}
+
+int op_msg (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user) {
+   /***********************
+    *  MSG OPERATION
+    ***********************/
+   char buf[MAX_BUFFER];
+   ofstream outfile;
+   string bname;
+   int num_rec;
+
+   // receive board name from client
+   memset((char*)&buf,0,sizeof(buf));
+   if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+
+   // then store name as filename
+   bname.assign(buf);
+   bname += ".txt";
+
+   // receive message from client
+   memset((char*)&buf,0,sizeof(buf));
+   if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+   
+   // check if board already exists
+   if (boards.find(bname) != boards.end()) {
+      // board exists open file stream and print formatted message to board
+      outfile.open(bname.c_str(), ofstream::app);
+      outfile << ++(boards.find(bname)->second) << ": " << user << " - " << buf << endl;
+   } else {
+      // error since board does not exist
+      return -1;
+   }
 
    // close file when done
    outfile.close();
@@ -140,7 +181,7 @@ int main(int argc, char* argv[]) {
    unordered_map<string,string> users; // map of usernames to passwords
    short int res;                      // use for sending short int responses
    string user;                        // store current username
-   unordered_set<string> boards;       // store all created boards
+   unordered_map<string,int> boards;   // store all created boards
 
    // handle all arguments
    if (argc == 3) {
@@ -255,11 +296,18 @@ int main(int argc, char* argv[]) {
             /***********************
              *  MSG OPERATION
              ***********************/
-            // client sends name of board
-            // client sends message to post
-            // server sends conf message
-
+            memset((char*)&buf,0,sizeof(buf));
+            if (op_msg(udp_s,client_addr,alen,boards,user) < 0) {
+               strcpy(buf,"Message not posted successfully\n\tcheck if board exists\n");
+            } else {
+               strcpy(buf,"Message posted successfully!\n");
+            }
+            if (sendto(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,sizeof(struct sockaddr)) == -1) {
+               fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
+               exit(1);
+            }
             continue;
+
          } else if (!strcmp(buf,"DLT")) {
             /***********************
              *  DLT OPERATION
