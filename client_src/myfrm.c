@@ -23,6 +23,10 @@ int authentication(int s);
 int create(int s_udp, struct sockaddr_in sin2);
 int message(int s_udp, struct sockaddr_in sin2);
 int delete(int s_udp, struct sockaddr_in sin2);
+int edit(int s_udp, struct sockaddr_in sin2);
+int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp);
+int shut_down(int s_udp, struct sockaddr_in sin2);
+
 int main(int argc, const char* argv[]){
 
     //check for valid input
@@ -142,16 +146,17 @@ int main(int argc, const char* argv[]){
 
         } else if (!strcmp(operation_buf, "RDB")){ 
 
-            //send name
-            //receive int for file size tcp
-            //loop use upl req style            
-
+            if(read_board(s_udp, sin2, s_tcp) < 0){
+                printf("RDB operation failed\n");
+                exit(1);
+            }
 
         } else if (!strcmp(operation_buf, "EDT")){
 
-            //send name
-            //send message id
-            //receive string frm server and print
+            if (edit(s_udp, sin2) < 0){
+                printf("EDT operation failed\n");
+                exit(1);
+            }
 
         } else if (!strcmp(operation_buf, "APN")){
 
@@ -169,6 +174,8 @@ int main(int argc, const char* argv[]){
 
         } else if (!strcmp(operation_buf, "XIT")){
             //close sockets
+            close(s_udp);
+            close(s_tcp);
             return 0;
 
         } else if (!strcmp(operation_buf, "SHT")){
@@ -389,4 +396,108 @@ int edit(int s_udp, struct sockaddr_in sin2){
         printf("Error sending message to the server\n");
         return -1;
     } 
+
+    bzero(buf, sizeof(buf));
+    //receive confirmation string and print it
+    if((rec_bytes = recvfrom(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, &len)) < 0){
+        printf("Error receiving confirmation!\n");
+        return -1;
+    } 
+    printf("%s\n", buf);
+
+    return 0;
 }
+
+int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
+
+    int rec_bytes; //number of bytes received
+    int send_val; //send number of bytes
+    char buf[MAX_BUFFER];
+    socklen_t len = sizeof(struct sockaddr_in);
+
+    bzero(buf, sizeof(buf));
+    //ask user for name of board to read and send it
+    printf("What is the message you would like to read?\n");
+    scanf("%s", buf);
+    
+    if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error with sending name of board to server\n");
+        return -1;
+    }
+
+    int file_size;
+
+    if((rec_bytes = recvfrom(s_udp, &file_size, sizeof(int), 0, (struct sockaddr*)&sin2, &len)) < 0){
+       printf("Error with receiving file size from the server\n");
+       return -1;
+    }
+   
+    file_size = ntohl(file_size); 
+    //if file_size is negative that means board doesnt exist
+    if(file_size < 0){
+        printf("Board does not exist on server\n");
+        return 0;
+    }
+   
+    //enter loop and starts receiving the contents of the board and
+    //printing them until the total data received == the filesize  
+    int total_rec = 0;
+    int rec_count = 0;
+    int rec_size;
+    while(1){
+    
+        if(file_size - total_rec < MAX_BUFFER){
+            rec_size = file_size - total_rec;
+        } else {
+            rec_size = sizeof(buf);
+        }
+        
+        //receive the data
+        bzero(buf, sizeof(buf));
+        
+        if((rec_bytes = recv(s_tcp, buf, rec_size, 0)) < 0){
+            printf("Error receiving data\n");
+            return -1;
+        }
+       
+        //print out the data
+        printf("%s\n", buf);
+        rec_count++;       
+        total_rec = total_rec + rec_bytes;
+        
+        if(total_rec >= file_size){
+            break;
+        }
+    }
+
+        return 0;               
+}
+
+int shut_down(int s_udp, struct sockaddr_in sin2){
+    
+    int rec_bytes; //number of bytes received
+    int send_val; //send number of bytes
+    char buf[MAX_BUFFER];
+    socklen_t len = sizeof(struct sockaddr_in);
+    
+    //prompts for admin pass and send to server  
+    bzero(buf, sizeof(buf));
+    printf("Please enter the admin password for the server\n");
+    scanf("%s", buf);
+    
+    if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error with sending admin password to server\n"); 
+        return -1;
+    }
+
+    short int confirm;
+    //recieve confirmation int from server to see what next steps to take
+    //if -1 this means failed and go back to prompt for user operation
+
+    if((rec_bytes = recvfrom(s_udp, &confirm, sizeof(short int), 0, (struct sockaddr*)&sin2, &len)) < 0){
+        printf("Error with receiving confirmation from server\n");
+        return -1;
+    }
+    
+    //recieve message from the server
+}  
