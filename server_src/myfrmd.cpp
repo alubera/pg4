@@ -169,16 +169,17 @@ int op_msg (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
    return 0;
 }
 
-int op_dlt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user) {
-   /***********************
-    *  DLT OPERATION
-    ***********************/
+int op_dlt_edt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user, bool edt) {
+   /****************************
+    *  DLT AND EDIT OPERATIONS
+    ****************************/
    char buf[MAX_BUFFER];
    ifstream og_file;
    ofstream temp_file;
-   string bname,board_user,line,cur_id;
+   string bname,line_user,line,cur_id,new_line;
    int num_rec;
    int msg_id;
+   int res = -1;
 
    // receive board name from client
    memset((char*)&buf,0,sizeof(buf));
@@ -186,10 +187,11 @@ int op_dlt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
       fprintf(stderr,"ERROR: receive error\n");
       exit(1);
    }
-
    // then store name as filename
    bname.assign(buf);
    bname += ".txt";
+
+   cerr << bname << endl;
 
    // receive message id from client
    if ((num_rec = recvfrom(udp_s,&msg_id,sizeof(msg_id),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
@@ -198,33 +200,77 @@ int op_dlt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
    }
    msg_id = ntohl(msg_id);
 
+   cerr << msg_id << endl;
+
+   if (msg_id < 0) {
+      // obviously not valid message id
+      // client probably detected invalid input
+      return -1;
+   }
+
+   // if this is an edt call, receive again (for edit)
+   if (edt) {
+      memset((char*)&buf,0,sizeof(buf));
+      if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+         fprintf(stderr,"ERROR: receive error\n");
+         exit(1);
+      }
+      // then store name as filename
+      new_line.assign(buf);
+      cerr << "EDT: " << new_line << endl;
+   }
+
    // check if board exists
-   if (boards.find(bname) == boards.end()) {
+   auto got = boards.find(bname);
+   if (got == boards.end()) {
       // error since board does not exist
       return -1;
-   } else {
-      // if board exists open file stream and check user
-      og_file.open(bname.c_str());
-      getline(og_file,board_user);
-      if (board_user != user) {
-         // error since user is not same user who created board
+      // if msg_id is not valid, also return error
+      if (msg_id > got->second) {
          return -1;
       }
    }
 
+   // board exists, open file stream
+   og_file.open(bname.c_str());
+   getline(og_file,line);
+
    // open stream for temp file
    temp_file.open("tempfile.txt");
-   temp_file << board_user << "\n";
+   temp_file << line << "\n";
 
    // loop through file looking for message id
    while (getline(og_file,line)) {
       stringstream ss(line);
       getline(ss,cur_id,':');
-      if (stoi(cur_id) != msg_id) {
-         // write line to new file as long as line is not supposed to be deleted
-         line += "\n";
-         temp_file << line;
+      cerr << line << endl;
+      if (stoi(cur_id) == msg_id) {
+         // target line found
+         // get space and then username for line
+         cerr << "FOUND LINE" << endl;
+         char c;
+         ss.get(c);
+         ss >> line_user;
+         // check user before doing anything else
+         if (line_user == user) {
+            cerr << "CORRECT USER" << endl;
+            if (edt) {
+               // if edit flag is set, write edited line to file
+               temp_file << msg_id << ": " << user << " - " << new_line << endl;
+            }
+            // dlt will write nothing
+            res = 0;
+            // skip writing original line to file
+            continue;
+         } else {
+            cerr << "NOT CORRECT USER" << endl;
+            // if user is not og user, error res will be saved
+            // loop will continue to run so that file is identical to before call
+         }
       }
+      // write line to new file as long as line is not supposed to be changed
+      line += "\n";
+      temp_file << line;
    }
 
    // remove og file
@@ -235,7 +281,7 @@ int op_dlt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
    // close files when done
    og_file.close();
    temp_file.close();
-   return 0;
+   return res;
 }
 
 int main(int argc, char* argv[]) {
@@ -383,8 +429,8 @@ int main(int argc, char* argv[]) {
              *  DLT OPERATION
              ***********************/
             memset((char*)&buf,0,sizeof(buf));
-            if (op_dlt(udp_s,client_addr,alen,boards,user) < 0) {
-               strcpy(buf,"Message not deleted successfully\n\tcheck if board exists\n");
+            if (op_dlt_edt(udp_s,client_addr,alen,boards,user,false) < 0) {
+               strcpy(buf,"Message not deleted successfully\n\tboard must exist and must be correct user\n");
             } else {
                strcpy(buf,"Message deleted successfully!\n");
             }
@@ -398,9 +444,18 @@ int main(int argc, char* argv[]) {
             /***********************
              *  EDT OPERATION
              ***********************/
-            // client sends name of board
-            // client sends message ID to edit (short int)
-            // server sends conf message
+            memset((char*)&buf,0,sizeof(buf));
+            if (op_dlt_edt(udp_s,client_addr,alen,boards,user,true) < 0) {
+               strcpy(buf,"Message not edited successfully\n\tboard must exist and must be correct user\n");
+            } else {
+               strcpy(buf,"Message edited successfully!\n");
+            }
+            if (sendto(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,sizeof(struct sockaddr)) == -1) {
+               fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
+               exit(1);
+            }
+            continue;
+
          } else if (!strcmp(buf,"LIS")) {
             /***********************
              *  LIS OPERATION
