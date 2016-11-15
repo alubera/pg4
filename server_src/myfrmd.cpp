@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -168,6 +169,75 @@ int op_msg (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
    return 0;
 }
 
+int op_dlt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user) {
+   /***********************
+    *  DLT OPERATION
+    ***********************/
+   char buf[MAX_BUFFER];
+   ifstream og_file;
+   ofstream temp_file;
+   string bname,board_user,line,cur_id;
+   int num_rec;
+   int msg_id;
+
+   // receive board name from client
+   memset((char*)&buf,0,sizeof(buf));
+   if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+
+   // then store name as filename
+   bname.assign(buf);
+   bname += ".txt";
+
+   // receive message id from client
+   if ((num_rec = recvfrom(udp_s,&msg_id,sizeof(msg_id),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+   msg_id = ntohl(msg_id);
+
+   // check if board exists
+   if (boards.find(bname) == boards.end()) {
+      // error since board does not exist
+      return -1;
+   } else {
+      // if board exists open file stream and check user
+      og_file.open(bname.c_str());
+      getline(og_file,board_user);
+      if (board_user != user) {
+         // error since user is not same user who created board
+         return -1;
+      }
+   }
+
+   // open stream for temp file
+   temp_file.open("tempfile.txt");
+   temp_file << board_user << "\n";
+
+   // loop through file looking for message id
+   while (getline(og_file,line)) {
+      stringstream ss(line);
+      getline(ss,cur_id,':');
+      if (stoi(cur_id) != msg_id) {
+         // write line to new file as long as line is not supposed to be deleted
+         line += "\n";
+         temp_file << line;
+      }
+   }
+
+   // remove og file
+   remove(bname.c_str());
+   // rename the tempfile
+   rename("tempfile.txt",bname.c_str());
+
+   // close files when done
+   og_file.close();
+   temp_file.close();
+   return 0;
+}
+
 int main(int argc, char* argv[]) {
    struct sockaddr_in sin;             // struct for address info
    int slen = sizeof(sin); 
@@ -312,9 +382,18 @@ int main(int argc, char* argv[]) {
             /***********************
              *  DLT OPERATION
              ***********************/
-            // client sends name of board
-            // client sends message ID to delete (short int)
-            // server sends conf message
+            memset((char*)&buf,0,sizeof(buf));
+            if (op_dlt(udp_s,client_addr,alen,boards,user) < 0) {
+               strcpy(buf,"Message not deleted successfully\n\tcheck if board exists\n");
+            } else {
+               strcpy(buf,"Message deleted successfully!\n");
+            }
+            if (sendto(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,sizeof(struct sockaddr)) == -1) {
+               fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
+               exit(1);
+            }
+            continue;
+           
          } else if (!strcmp(buf,"EDT")) {
             /***********************
              *  EDT OPERATION
