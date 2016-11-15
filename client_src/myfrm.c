@@ -25,7 +25,8 @@ int message(int s_udp, struct sockaddr_in sin2);
 int delete(int s_udp, struct sockaddr_in sin2);
 int edit(int s_udp, struct sockaddr_in sin2);
 int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp);
-int shut_down(int s_udp, struct sockaddr_in sin2);
+int destroy_board(int s_udp, struct sockaddr_in sin2);
+int shut_down(int s_udp, struct sockaddr_in sin2, int s_tcp);
 
 int main(int argc, const char* argv[]){
 
@@ -109,6 +110,7 @@ int main(int argc, const char* argv[]){
         fflush(stdout);
 
         bzero(operation_buf, sizeof(operation_buf));
+        fflush(stdin);
         scanf("%s", operation_buf);
 
         //send the operation buffer to the server
@@ -172,6 +174,11 @@ int main(int argc, const char* argv[]){
 
         } else if (!strcmp(operation_buf, "DST")){
 
+            if (destroy_board(s_udp, sin2) < 0){
+                printf("DST operation failed\n");
+                exit(1);
+            }
+
         } else if (!strcmp(operation_buf, "XIT")){
             //close sockets
             close(s_udp);
@@ -179,8 +186,17 @@ int main(int argc, const char* argv[]){
             return 0;
 
         } else if (!strcmp(operation_buf, "SHT")){
-           //udp receive 1 or -1  
+        
+            if(shut_down(s_udp, sin2, s_tcp) < 0){
+                printf("SHT operation failed\n");
+                exit(1);
+            }
+        } else{
+           
+           printf("Did not enter a valid operation, please try again\n");
+           printf("Make sure input is in all caps\n");
         }
+   
     }
 
 }
@@ -318,7 +334,7 @@ int delete(int s_udp, struct sockaddr_in sin2){
     socklen_t len = sizeof(struct sockaddr_in);
 
     bzero(buf, sizeof(buf));
-    printf("What is the name of the board you would like to send?\n");
+    printf("What is the name of the board you would like to delete on?\n");
     scanf("%s", buf);
 
     //send name of the board
@@ -327,18 +343,29 @@ int delete(int s_udp, struct sockaddr_in sin2){
         return -1;
     }
 
-    short int message_id;
+    int message_id;
+    char term;
     printf("What is the message you would like to delete (ID number)?\n");
-    scanf("%i", message_id);
+    if(scanf("%d%c", &message_id, &term) !=2 || term != '\n'){
+        printf("Please make sure message ID is a valid integer\n");
+        message_id = -1;
+        if((send_val = sendto(s_udp, &message_id, sizeof(int),0, (struct sockaddr*)&sin2, len)) < 0){
+            printf("Error with sending message id to the server\n");
+            return -1;
+        }
+        return 0;
+    } 
 
-    //send message id (short int) to server
-    message_id = htons(message_id);
-    
-    if((send_val = sendto(s_udp, &message_id, sizeof(short int),0, (struct sockaddr*)&sin2, len)) < 0){
+    //send message id (int) to server
+    message_id = htonl(message_id);
+   
+    if((send_val = sendto(s_udp, &message_id, sizeof(int),0, (struct sockaddr*)&sin2, len)) < 0){
         printf("Error with sending message id to the server\n");
         return -1;
     }
-   
+  
+    printf("number of bytes sent for message_id: %i\n", send_val);
+     
     bzero(buf, sizeof(buf)); 
     //recieve confirmation string from server
     if((rec_bytes = recvfrom(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, &len)) < 0){
@@ -369,14 +396,22 @@ int edit(int s_udp, struct sockaddr_in sin2){
         return -1;
     }
 
-    short int message_id;
+    int message_id;
+    char term;
     printf("What is the message you would like to edit (ID number)?\n");
-    scanf("%i", message_id);
+    if(scanf("%d%c", &message_id, &term) !=2 || term != '\n'){
+        printf("Please make sure message ID is a valid integer\n");
+        message_id = -1;
+        if((send_val = sendto(s_udp, &message_id, sizeof(int),0, (struct sockaddr*)&sin2, len)) < 0){
+            printf("Error with sending message id to the server\n");
+            return -1;
+        }
+        return 0;
+    }
+    //send message id (int) to server
+    message_id = htonl(message_id);
 
-    //send message id (short int) to server
-    message_id = htons(message_id);
-
-    if((send_val = sendto(s_udp, &message_id, sizeof(short int),0, (struct sockaddr*)&sin2, len)) < 0){
+    if((send_val = sendto(s_udp, &message_id, sizeof(int),0, (struct sockaddr*)&sin2, len)) < 0){
         printf("Error with sending message id to the server\n");
         return -1;
     }
@@ -473,7 +508,35 @@ int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
         return 0;               
 }
 
-int shut_down(int s_udp, struct sockaddr_in sin2){
+int destroy_board(int s_udp, struct sockaddr_in sin2){
+    
+    int rec_bytes;
+    int send_val;
+    char buf[MAX_BUFFER];
+    socklen_t len = sizeof(struct sockaddr_in);
+
+    bzero(buf, sizeof(buf));
+    printf("Please enter the name of the board you would like to destroy.\n");
+    scanf("%s", buf);
+  
+    //send board name to the server 
+    if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error with sending the name of the board to the server\n");
+        return -1;
+    }  
+
+    //receive message from server and print it out
+    bzero(buf, sizeof(buf));
+    if((rec_bytes = recvfrom(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, &len)) < 0){
+        printf("Error with receiving message from the server\n");
+        return -1;
+    }
+
+    printf("%s\n", buf);
+
+}
+
+int shut_down(int s_udp, struct sockaddr_in sin2, int s_tcp){
     
     int rec_bytes; //number of bytes received
     int send_val; //send number of bytes
@@ -499,5 +562,102 @@ int shut_down(int s_udp, struct sockaddr_in sin2){
         return -1;
     }
     
+    bzero(buf, sizeof(buf));
     //recieve message from the server
-}  
+    if((rec_bytes = recvfrom(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, &len)) < 0){
+        printf("Error with receiving message from the server\n");
+        return -1;
+    }
+
+    printf("%s\n", buf);
+
+    if(confirm == -1){
+        return 0;
+    }
+
+    if(confirm == 1){
+        close(s_udp);
+        close(s_tcp);
+        exit(0);
+    }
+     
+    return 0;   
+} 
+
+int append_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
+    
+    int rec_bytes; //number of bytes received
+    int send_val; //send number of bytes
+    char buf[MAX_BUFFER];
+    char file_name[MAX_BUFFER];
+    socklen_t len = sizeof(struct sockaddr_in);   
+    
+    bzero(buf, sizeof(buf));
+    
+    printf("What is the name of the board you would like to append to?\n");
+    scanf("%s\n", buf);
+    
+    //send name of the board to append to
+    if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error with sending name of board to server\n");
+        return -1;
+    }
+    
+    bzero(file_name, sizeof(file_name));
+   
+    //send name of file to use to append
+    printf("What is the name of the file you would like to append?\n");
+    scanf("%s\n", file_name);
+    
+    //send file name
+    if((send_val = sendto(s_udp, file_name, sizeof(file_name), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error with sending name of board to server\n");
+        return -1;
+    }
+
+    int confirm;
+    //server checks if board exists and sends confirmation
+    if((rec_bytes = recvfrom(s_udp, &confirm, sizeof(int), 0, (struct sockaddr*)&sin2, &len)) < 0){
+        printf("Error with receiving confirm from the server\n");
+        return -1;
+    }
+
+    confirm = ntohl(confirm);
+
+    //if the board doesnt exist go back to the beginning
+    if (confirm < 0){
+        printf("Board does not exist, returning to main menu\n");
+        return 0;
+    }
+    
+    //find file and send size
+    int file_size;
+    FILE* fp;
+    if ((fp = fopen(file_name, "r")) != NULL){
+        //use fseek to get the file size
+        fseek(fp,0,SEEK_END);
+        file_size = ftell(fp);
+        fseek(fp,0,SEEK_SET);
+    } else{
+        //file doesnt exist send error resp
+        file_size = -1;
+        printf("Error file doesn't exist\n");
+    }
+   
+    //send file size to server (if negative that means file didnt exist)
+    //and the server should go back to wait for client
+    file_size = htonl(file_size);
+    if((send_val = sendto(s_udp, &file_size, sizeof(int), 0, (struct sockaddr*)&sin2, len)) < 0){
+        printf("Error sending file size to the server\n");
+        return -1;
+    }
+    
+    file_size = ntohl(file_size);
+    
+    if (file_size == -1){
+        return 0;
+    }
+    
+    //start sending the file
+    //read file into a buffer, 4096 chars at a time       
+}    
