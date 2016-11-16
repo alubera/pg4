@@ -28,6 +28,7 @@
 #include <dirent.h>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #define MAX_BUFFER 4096
 #define MAX_PENDING 0
 #define MAX_USERS 16
@@ -394,7 +395,7 @@ void op_rdb_dwn (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t
    return;
 }
 
-void op_apn (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user) {
+void op_apn (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user, unordered_map<string,vector<string> > &appends) {
    /***********************
     *  APN OPERATION
     ***********************/
@@ -498,9 +499,70 @@ void op_apn (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t ale
    b_file.open(bname.c_str(), ofstream::app);
    b_file << ++(boards.find(bname)->second) << ": " << user << " - " << og_name << " (APN FILE)" << endl;
 
+   // keep track of appended files
+   appends[bname].push_back(fname);
+
    a_file.close();
    b_file.close();
    return;
+}
+
+void help_me_destroy(string board, unordered_map<string,vector<string> > appends) {
+   // delete all appended files
+   auto got = appends.find(board);
+   if (got != appends.end()) {
+      for (auto it = got->second.begin(); it != got->second.end(); ++it) {
+         remove(it->c_str());
+      }
+   }
+
+   // lastly remove the board itself
+   remove(board.c_str());
+
+   return;
+}
+
+int op_dst (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user, unordered_map<string,vector<string> > &appends) {
+   /***********************
+    *  DST OPERATION
+    ***********************/
+   char buf[MAX_BUFFER];
+   ifstream b_file;
+   string bname,b_user;
+   int num_rec;
+
+   // receive board name from client
+   memset((char*)&buf,0,sizeof(buf));
+   if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+   // then store name as filename
+   bname.assign(buf);
+   bname += ".txt";
+
+   // check if board exists
+   if (boards.find(bname) == boards.end()) {
+      // error since board does not exist
+      return -1;
+   }
+
+   // board exists, open file stream
+   b_file.open(bname.c_str());
+   getline(b_file,b_user);
+
+   // check if board user is the same as current user
+   if (b_user != user) {
+      return -1;
+   }
+
+   // my helper function for destroying things
+   help_me_destroy(bname,appends);
+
+   // get rid of board from appends map
+   appends.erase(bname);  
+
+   return 0;
 }
 
 int main(int argc, char* argv[]) {
@@ -512,18 +574,19 @@ int main(int argc, char* argv[]) {
    int server_port;                    // user input - port num
    int s, new_s, udp_s;                // socket and new socket
    int num_rec, num_sent;              // size of messages sent and received
-   string admin_passwd;                // user input - admin password
+   string admin_pswd;                // user input - admin password
    unordered_map<string,string> users; // map of usernames to passwords
    short int res;                      // use for sending short int responses
    string user;                        // store current username
    unordered_map<string,int> boards;   // store all created boards
+   unordered_map<string,vector<string> > appends;   // store all appended files
 
    // handle all arguments
    if (argc == 3) {
       // port number
       server_port = atoi(argv[1]);
       // admin password
-      admin_passwd = argv[2];
+      admin_pswd = argv[2];
    } else {
       fprintf(stderr,"ERROR: invalid number of arguments\n");
       fprintf(stderr,"\tprogram should be called with port number and admin password\n");
@@ -687,7 +750,7 @@ int main(int argc, char* argv[]) {
             /***********************
              *  APN OPERATION
              ***********************/
-            op_apn(udp_s,new_s,client_addr,alen,boards,user);
+            op_apn(udp_s,new_s,client_addr,alen,boards,user,appends);
 
          } else if (!strcmp(buf,"DWN")) {
             /***********************
@@ -699,25 +762,64 @@ int main(int argc, char* argv[]) {
             /***********************
              *  DST OPERATION
              ***********************/
-            // client sends name of board to be destroyed
-            // server needs to check if this is user who created board
-            // server sends conf message
+            memset((char*)&buf,0,sizeof(buf));
+            if (op_dst(udp_s,client_addr,alen,boards,user,appends) < 0) {
+               strcpy(buf,"Board not destroyed\n\tboard must exist and must be correct user\n");
+            } else {
+               strcpy(buf,"Board destroyed successfully!\n");
+            }
+            if (sendto(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,sizeof(struct sockaddr)) == -1) {
+               fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
+               exit(1);
+            }
+
          } else if (!strcmp(buf,"XIT")) {
             /***********************
              *  XIT OPERATION
              ***********************/
             // server closes TCP socket
             close(new_s);
+            close(udp_s);
             break;
+
          } else if (!strcmp(buf,"SHT")) {
             /***********************
              *  SHT OPERATION
              ***********************/
-            // client sends admin password to server
-            // send conf int if passwords match
+            string user_pswd;
+            int res;
+
+            memset((char*)&buf,0,sizeof(buf));
+            // receive admin pswd from client
+            if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+               fprintf(stderr,"ERROR: receive error\n");
+               exit(1);
+            }
+            user_pswd.assign(buf);
+            if (user_pswd == admin_pswd) {
+               // set flag/respose to delete everything
+               res = 1;
+            } else {
+               // else passwords dont match...do nothing
+               res = -1;
+            }
+            res = htonl(res);
+            if (sendto(udp_s,&res,sizeof(res),0,(struct sockaddr*)&client_addr,sizeof(struct sockaddr)) == -1) {
+               fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
+               exit(1);
+            }
+            res = ntohl(res);
+            if (res == 1) {
+               // shutdown delete everything!!
+               for (auto it = boards.begin(); it != boards.end(); ++it) {
+                  help_me_destroy(it->first,appends);
+               }
+               close(new_s);
+               close(udp_s);
+               close(s);
+               return 0;
+            }
          }
       }
    }
-   close(s);
-   return 0;
 }
