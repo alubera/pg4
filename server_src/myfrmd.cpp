@@ -303,15 +303,16 @@ void op_lis (int udp_s, struct sockaddr_in client_addr, socklen_t alen, const un
    }
 }
 
-void op_rdb (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t alen, const unordered_map<string,int> &boards) {
-   /***********************
-    *  RDB OPERATION
-    ***********************/
+void op_rdb_dwn (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t alen, const unordered_map<string,int> &boards, bool dwn) {
+   /**************************
+    *  RDB AND DWN OPERATIONS
+    **************************/
    char buf[MAX_BUFFER];
    int num_rec;
    int fsize;
    ifstream b_file;
    string bname;
+   string fname;
 
    // receive board name from client
    memset((char*)&buf,0,sizeof(buf));
@@ -321,6 +322,20 @@ void op_rdb (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t ale
    }
    // then store name as filename
    bname.assign(buf);
+
+   if (dwn) {
+      // receive file name from client
+      memset((char*)&buf,0,sizeof(buf));
+      if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+         fprintf(stderr,"ERROR: receive error\n");
+         exit(1);
+      }
+      // then store name
+      fname = bname;
+      fname += "-";
+      fname += buf;
+      fname += ".txt";
+   }
    bname += ".txt";
 
    // check if board exists
@@ -329,10 +344,20 @@ void op_rdb (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t ale
       fsize = -1;
    } else {
       // board exists, get filesize
-      b_file.open(bname.c_str(),ios::binary);
-      b_file.seekg(0,ios::end);
-      fsize = b_file.tellg();
-      b_file.close();
+      // open APN file if this is called from dwn
+      if (dwn) {
+         b_file.open(fname.c_str(),ios::binary);
+      } else {
+         b_file.open(bname.c_str(),ios::binary);
+      }
+      // make sure that file exists (in the case of dwn)
+      if (b_file.good()) {
+         b_file.seekg(0,ios::end);
+         fsize = b_file.tellg();
+         b_file.close();
+      } else {
+         fsize = -1;
+      }
    }
 
    // send file size (or negative conf)
@@ -343,19 +368,21 @@ void op_rdb (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t ale
    }
    fsize = ntohl(fsize);
 
-   cerr << "fsize: " << fsize << endl;
-
    // if board does not exist, skip sending step
    if (fsize == -1) return;
 
-   // reopen board
-   b_file.open(bname.c_str());
+   // reopen board/file
+   if (dwn) {
+      b_file.open(fname.c_str());
+   } else {
+      b_file.open(bname.c_str());
+   }
 
-   // read board into buffer, 4096 chars at a time, and send
+   // read into buffer, 4096 chars at a time, and send
    int count = 0;
-   while (b_file.readsome(buf,MAX_BUFFER) > 0) {
-      cerr << buf;
-      if (send(tcp_s,buf,strlen(buf),0) == -1) {
+   int read;
+   while ((read = b_file.readsome(buf,MAX_BUFFER)) > 0) {
+      if (send(tcp_s,buf,read,0) == -1) {
          fprintf(stderr,"ERROR: send error\n");
          exit(1);         
       }
@@ -363,6 +390,115 @@ void op_rdb (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t ale
       memset((char*)&buf,0,sizeof(buf));
    }
 
+   b_file.close();
+   return;
+}
+
+void op_apn (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t alen, unordered_map<string,int> &boards, string user) {
+   /***********************
+    *  APN OPERATION
+    ***********************/
+   char buf[MAX_BUFFER];
+   int num_rec;
+   int fsize;
+   int res;
+   int fname_len;
+   ofstream a_file, b_file;
+   ifstream infile;
+   string bname, fname;
+
+   // receive board name from client
+   memset((char*)&buf,0,sizeof(buf));
+   if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+   // then store name
+   bname.assign(buf);
+
+   // receive file name from client
+   memset((char*)&buf,0,sizeof(buf));
+   if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+   // then store name
+   fname_len = strlen(buf);
+   fname = bname;
+   bname += ".txt";
+   fname += "-";
+   fname += buf;
+   fname += ".txt";
+
+   // check if board exists
+   if (boards.find(bname) == boards.end() ) {
+      // error since board does not exist
+      res = -1;
+   } else {
+      // else check if file already exists
+      infile.open(fname.c_str());
+      if (infile.good()) {
+         res = -1;
+      } else {
+         // else file can be appended to board
+         res = 1;
+      }
+   }
+   infile.close();
+
+   res = htonl(res);
+   if (sendto(udp_s,&res,sizeof(res),0,(struct sockaddr*)&client_addr,sizeof(struct sockaddr)) == -1) {
+      fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
+      exit(1);
+   }
+   res = ntohl(res);
+
+   // if file cannot be appeneded, do not receive
+   if (res < 0) return;
+
+   // receive file size from client
+   if ((num_rec = recvfrom(udp_s,&fsize,sizeof(fsize),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+   fsize = ntohl(fsize);
+
+   // check for error
+   if (fsize < 0) return;
+
+   // open ofstream
+   a_file.open(fname.c_str());
+
+   // receive file one buf at a time and write each to local file
+   int count = 0;
+   int rec_size = sizeof(buf);
+   while (1) {
+      // check to see what size will be received this loop
+      if (fsize-count < rec_size) {
+         rec_size = fsize-count;
+      }
+      // receive data
+      memset((char*)&buf,0,sizeof(buf));
+      if ((num_rec = recv(tcp_s,buf,rec_size,0)) == -1) {
+         fprintf(stderr,"ERROR: receive error\n");
+         exit(1);
+      }
+      count += num_rec;
+      // append buf to file
+      a_file.write(buf,num_rec);
+
+      // break if whole file has been received
+      if (count >= fsize) {
+         break;
+      }
+   }
+
+   // write line to message board file
+   string og_name = fname.substr(fname.find("-")+1,fname_len);
+   b_file.open(bname.c_str(), ofstream::app);
+   b_file << ++(boards.find(bname)->second) << ": " << user << " - " << og_name << " (APN FILE)" << endl;
+
+   a_file.close();
    b_file.close();
    return;
 }
@@ -489,7 +625,6 @@ int main(int argc, char* argv[]) {
                fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
                exit(1);
             }
-            continue;
 
          } else if (!strcmp(buf,"MSG")) {
             /***********************
@@ -505,7 +640,6 @@ int main(int argc, char* argv[]) {
                fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
                exit(1);
             }
-            continue;
 
          } else if (!strcmp(buf,"DLT")) {
             /***********************
@@ -521,7 +655,6 @@ int main(int argc, char* argv[]) {
                fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
                exit(1);
             }
-            continue;
            
          } else if (!strcmp(buf,"EDT")) {
             /***********************
@@ -537,40 +670,31 @@ int main(int argc, char* argv[]) {
                fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
                exit(1);
             }
-            continue;
 
          } else if (!strcmp(buf,"LIS")) {
             /***********************
              *  LIS OPERATION
              ***********************/
             op_lis(udp_s,client_addr,alen,boards);
-            continue;
 
          } else if (!strcmp(buf,"RDB")) {
             /***********************
              *  RDB OPERATION
              ***********************/
-            op_rdb(udp_s,new_s,client_addr,alen,boards);
-            continue;
+            op_rdb_dwn(udp_s,new_s,client_addr,alen,boards,false);
 
          } else if (!strcmp(buf,"APN")) {
             /***********************
              *  APN OPERATION
              ***********************/
-            // SEND TCP
-            // client sends name of board
-            // client sends name of file to be appended
-            // server sends conf message (int)
-            // if conf was positive, client sends file in chunks
+            op_apn(udp_s,new_s,client_addr,alen,boards,user);
+
          } else if (!strcmp(buf,"DWN")) {
             /***********************
              *  DWN OPERATION
              ***********************/
-            // SEND TCP
-            // client sends name of board
-            // client sends name of file to be downloaded
-            // server sends filesize (int) or neg
-            // server sends file in chunks
+            op_rdb_dwn(udp_s,new_s,client_addr,alen,boards,true);
+
          } else if (!strcmp(buf,"DST")) {
             /***********************
              *  DST OPERATION
