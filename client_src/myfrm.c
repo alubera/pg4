@@ -24,11 +24,13 @@ int create(int s_udp, struct sockaddr_in sin2);
 int message(int s_udp, struct sockaddr_in sin2);
 int delete(int s_udp, struct sockaddr_in sin2);
 int edit(int s_udp, struct sockaddr_in sin2);
-int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp);
+int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp, struct sockaddr_in sin);
 int destroy_board(int s_udp, struct sockaddr_in sin2);
 int shut_down(int s_udp, struct sockaddr_in sin2, int s_tcp);
 int list(int s_udp, struct sockaddr_in sin2);
 int append_board(int s_udp, struct sockaddr_in sin2, int s_tcp);
+int download(int s_udp, struct sockaddr_in sin2, int s_tcp);
+
 
 int main(int argc, const char* argv[]){
 
@@ -153,7 +155,7 @@ int main(int argc, const char* argv[]){
 
         } else if (!strcmp(operation_buf, "RDB")){ 
 
-            if(read_board(s_udp, sin2, s_tcp) < 0){
+            if(read_board(s_udp, sin2, s_tcp,sin) < 0){
                 printf("RDB operation failed\n");
                 exit(1);
             }
@@ -167,16 +169,17 @@ int main(int argc, const char* argv[]){
 
         } else if (!strcmp(operation_buf, "APN")){
 
-            //send name append to
-            //send name to be appended
-            //receive +1 or -1 
-            //+ means good it passed
-
+            if (append_board(s_udp, sin2, s_tcp) < 0){
+                printf("APN operation failed\n");
+                exit(1);
+            } 
 
         } else if (!strcmp(operation_buf, "DWN")){
 
-            //receive file size or negative
-
+            if (download(s_udp, sin2, s_tcp) < 0){
+                printf("DWN operation failed\n");
+                exit(1);
+            }
         } else if (!strcmp(operation_buf, "DST")){
 
             if (destroy_board(s_udp, sin2) < 0){
@@ -446,7 +449,7 @@ int edit(int s_udp, struct sockaddr_in sin2){
     return 0;
 }
 
-int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
+int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp, struct sockaddr_in sin){
 
     int rec_bytes; //number of bytes received
     int send_val; //send number of bytes
@@ -470,7 +473,7 @@ int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
        return -1;
     }
    
-    file_size = ntohl(file_size); 
+    file_size = ntohl(file_size);
     //if file_size is negative that means board doesnt exist
     if(file_size < 0){
         printf("Board does not exist on server\n");
@@ -492,19 +495,25 @@ int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
         
         //receive the data
         bzero(buf, sizeof(buf));
-        
+       
+        rec_size = sizeof(buf); 
         if((rec_bytes = recv(s_tcp, buf, rec_size, 0)) < 0){
             printf("Error receiving data\n");
             return -1;
         }
        
         //print out the data
-        printf("%s\n", buf);
+        //print char by char because just printing out buf
+        //by itself means that it is not null terminated
+        int i;
+        for(i = 0; i < sizeof(buf); i++){
+            printf("%c", buf[i]);
+        }
+        
         rec_count++;       
         total_rec = total_rec + rec_bytes;
-        
         if(total_rec >= file_size){
-            break;
+            return 0;
         }
     }
 
@@ -672,6 +681,7 @@ int append_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
         }
     }
 
+    fclose(fp);
     return 0;
 
 }   
@@ -711,11 +721,24 @@ int download(int s_udp, struct sockaddr_in sin2, int s_tcp){
         return -1;
     }
 
+    file_size = ntohl(file_size);
+    //if file_size is negative that means board doesnt exist
+    if(file_size < 0){
+        printf("Board does not exist on server\n");
+        return 0;
+    }
+
     //enter loop and starts receiving the contents of the board and
     //printing them until the total data received == the filesize  
     int total_rec = 0;
     int rec_count = 0;
     int rec_size;
+    FILE *f;
+    f = fopen(file_name, "a");
+    if (f == NULL){
+        printf("Error opening the file\n");
+    }
+    
     while(1){
     
         if(file_size - total_rec < MAX_BUFFER){
@@ -732,15 +755,18 @@ int download(int s_udp, struct sockaddr_in sin2, int s_tcp){
             return -1;
         }
 
-	//write data to file
-
-	rec_count++;       
+	    //write data to file
+    	fwrite(buf, sizeof(char), rec_bytes, f);
+        rec_count++;       
         total_rec = total_rec + rec_bytes;
         
         if(total_rec >= file_size){
             break;
         }
     }
+
+    fclose(f);
+    return 0;
 }
 
 int list(int s_udp, struct sockaddr_in sin2){
