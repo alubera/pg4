@@ -4,4 +4,4 @@ myfrmd: myfrmd.cpp
 	g++ -std=c++11 myfrmd.cpp -o myfrmd
 
 clean:
-	rm myfrmd *.txt
+	rm myfrmd

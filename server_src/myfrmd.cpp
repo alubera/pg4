@@ -108,7 +108,7 @@ int op_crt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
 
    // then store name as filename
    bname.assign(buf);
-   bname += ".txt";
+   bname += ".board";
 
    // check if board already exists
    if (boards.find(bname) != boards.end()) {
@@ -146,7 +146,7 @@ int op_msg (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
 
    // then store name as filename
    bname.assign(buf);
-   bname += ".txt";
+   bname += ".board";
 
    // receive message from client
    memset((char*)&buf,0,sizeof(buf));
@@ -190,7 +190,7 @@ int op_dlt_edt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unord
    }
    // then store name as filename
    bname.assign(buf);
-   bname += ".txt";
+   bname += ".board";
 
    // receive message id from client
    if ((num_rec = recvfrom(udp_s,&msg_id,sizeof(msg_id),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
@@ -335,9 +335,8 @@ void op_rdb_dwn (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t
       fname = bname;
       fname += "-";
       fname += buf;
-      fname += ".txt";
    }
-   bname += ".txt";
+   bname += ".board";
 
    // check if board exists
    if (boards.find(bname) == boards.end()) {
@@ -426,10 +425,9 @@ void op_apn (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t ale
    // then store name
    fname_len = strlen(buf);
    fname = bname;
-   bname += ".txt";
+   bname += ".board";
    fname += "-";
    fname += buf;
-   fname += ".txt";
 
    // check if board exists
    if (boards.find(bname) == boards.end() ) {
@@ -539,7 +537,7 @@ int op_dst (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
    }
    // then store name as filename
    bname.assign(buf);
-   bname += ".txt";
+   bname += ".board";
 
    // check if board exists
    if (boards.find(bname) == boards.end()) {
@@ -559,8 +557,9 @@ int op_dst (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unordered
    // my helper function for destroying things
    help_me_destroy(bname,appends);
 
-   // get rid of board from appends map
-   appends.erase(bname);  
+   // get rid of board from maps
+   appends.erase(bname);
+   boards.erase(bname);
 
    return 0;
 }
@@ -671,7 +670,6 @@ int main(int argc, char* argv[]) {
             fprintf(stderr,"ERROR: receive error\n");
             exit(1);
          }
-         cout << "User operation: " << buf << endl;
 
          // determine operation sent by client
          if (!strcmp(buf,"CRT")) {
@@ -779,7 +777,6 @@ int main(int argc, char* argv[]) {
              ***********************/
             // server closes TCP socket
             close(new_s);
-            close(udp_s);
             break;
 
          } else if (!strcmp(buf,"SHT")) {
