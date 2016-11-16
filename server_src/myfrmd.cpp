@@ -191,16 +191,12 @@ int op_dlt_edt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unord
    bname.assign(buf);
    bname += ".txt";
 
-   cerr << bname << endl;
-
    // receive message id from client
    if ((num_rec = recvfrom(udp_s,&msg_id,sizeof(msg_id),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
       fprintf(stderr,"ERROR: receive error\n");
       exit(1);
    }
    msg_id = ntohl(msg_id);
-
-   cerr << msg_id << endl;
 
    if (msg_id < 0) {
       // obviously not valid message id
@@ -217,7 +213,6 @@ int op_dlt_edt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unord
       }
       // then store name as filename
       new_line.assign(buf);
-      cerr << "EDT: " << new_line << endl;
    }
 
    // check if board exists
@@ -243,17 +238,14 @@ int op_dlt_edt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unord
    while (getline(og_file,line)) {
       stringstream ss(line);
       getline(ss,cur_id,':');
-      cerr << line << endl;
       if (stoi(cur_id) == msg_id) {
          // target line found
          // get space and then username for line
-         cerr << "FOUND LINE" << endl;
          char c;
          ss.get(c);
          ss >> line_user;
          // check user before doing anything else
          if (line_user == user) {
-            cerr << "CORRECT USER" << endl;
             if (edt) {
                // if edit flag is set, write edited line to file
                temp_file << msg_id << ": " << user << " - " << new_line << endl;
@@ -262,11 +254,9 @@ int op_dlt_edt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unord
             res = 0;
             // skip writing original line to file
             continue;
-         } else {
-            cerr << "NOT CORRECT USER" << endl;
-            // if user is not og user, error res will be saved
-            // loop will continue to run so that file is identical to before call
          }
+         // if user is not correct, no changes will be made to file
+         // error is also returned to user
       }
       // write line to new file as long as line is not supposed to be changed
       line += "\n";
@@ -282,6 +272,99 @@ int op_dlt_edt (int udp_s, struct sockaddr_in client_addr, socklen_t alen, unord
    og_file.close();
    temp_file.close();
    return res;
+}
+
+void op_lis (int udp_s, struct sockaddr_in client_addr, socklen_t alen, const unordered_map<string,int> &boards) {
+   /***********************
+    *  LIS OPERATION
+    ***********************/
+   // loop through board names in boards and add them to buffer with new lines
+   // then just send buffer
+   char buf[MAX_BUFFER];
+   size_t ext_loc;
+   int space = MAX_BUFFER;
+
+   memset((char*)&buf,0,sizeof(buf));
+   // loop through all boards
+   for (auto it = boards.begin(); it != boards.end(); ++it) {
+      // find where extension begins
+      ext_loc = it->first.find(".");
+      // add board name to buf to send
+      strncat(buf,it->first.substr(0,ext_loc).c_str(),space);
+      space = MAX_BUFFER-strlen(buf);
+      strncat(buf,"\n",space--);
+      if (space <= 0) break;
+   }
+
+   // send buf once all boards are added or full
+   if (sendto(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,sizeof(struct sockaddr)) == -1) {
+      fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
+      exit(1);
+   }
+}
+
+void op_rdb (int udp_s, int tcp_s, struct sockaddr_in client_addr, socklen_t alen, const unordered_map<string,int> &boards) {
+   /***********************
+    *  RDB OPERATION
+    ***********************/
+   char buf[MAX_BUFFER];
+   int num_rec;
+   int fsize;
+   ifstream b_file;
+   string bname;
+
+   // receive board name from client
+   memset((char*)&buf,0,sizeof(buf));
+   if ((num_rec = recvfrom(udp_s,buf,sizeof(buf),0,(struct sockaddr*)&client_addr,(socklen_t*)&alen)) == -1) {
+      fprintf(stderr,"ERROR: receive error\n");
+      exit(1);
+   }
+   // then store name as filename
+   bname.assign(buf);
+   bname += ".txt";
+
+   // check if board exists
+   if (boards.find(bname) == boards.end()) {
+      // error since board does not exist
+      fsize = -1;
+   } else {
+      // board exists, get filesize
+      b_file.open(bname.c_str(),ios::binary);
+      b_file.seekg(0,ios::end);
+      fsize = b_file.tellg();
+      b_file.close();
+   }
+
+   // send file size (or negative conf)
+   fsize = htonl(fsize);
+   if (sendto(udp_s,&fsize,sizeof(fsize),0,(struct sockaddr*)&client_addr,sizeof(struct sockaddr)) == -1) {
+      fprintf(stderr,"ERROR: server send error: %s\n",strerror(errno));
+      exit(1);
+   }
+   fsize = ntohl(fsize);
+
+   cerr << "fsize: " << fsize << endl;
+
+   // if board does not exist, skip sending step
+   if (fsize == -1) return;
+
+   // reopen board
+   b_file.open(bname.c_str());
+
+   // read board into buffer, 4096 chars at a time, and send
+   int count = 0;
+   while (b_file.readsome(buf,MAX_BUFFER) > 0) {
+      cerr << buf;
+      if (send(tcp_s,buf,strlen(buf),0) == -1) {
+         fprintf(stderr,"ERROR: send error\n");
+         exit(1);         
+      }
+      if (b_file.eof()) {cout << "eof" << endl; break;}
+      memset((char*)&buf,0,sizeof(buf));
+   }
+
+   b_file.close();
+   return;
 }
 
 int main(int argc, char* argv[]) {
@@ -460,15 +543,16 @@ int main(int argc, char* argv[]) {
             /***********************
              *  LIS OPERATION
              ***********************/
-            // TBD
+            op_lis(udp_s,client_addr,alen,boards);
+            continue;
+
          } else if (!strcmp(buf,"RDB")) {
             /***********************
              *  RDB OPERATION
              ***********************/
-            // SEND TCP
-            // client sends name of board to read
-            // server sends filesize/boardsize (int) or neg
-            // server sends file in chunks (use UPL/REQ)
+            op_rdb(udp_s,new_s,client_addr,alen,boards);
+            continue;
+
          } else if (!strcmp(buf,"APN")) {
             /***********************
              *  APN OPERATION
