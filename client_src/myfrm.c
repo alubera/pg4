@@ -458,7 +458,7 @@ int read_board(int s_udp, struct sockaddr_in sin2, int s_tcp, struct sockaddr_in
 
     bzero(buf, sizeof(buf));
     //ask user for name of board to read and send it
-    printf("What is the message you would like to read?\n");
+    printf("What is the message board you would like to read?\n");
     scanf("%s", buf);
     
     if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
@@ -607,7 +607,7 @@ int append_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
     bzero(buf, sizeof(buf));
     
     printf("What is the name of the board you would like to append to?\n");
-    scanf("%s\n", buf);
+    scanf("%s", buf);
     
     //send name of the board to append to
     if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
@@ -619,7 +619,7 @@ int append_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
    
     //send name of file to use to append
     printf("What is the name of the file you would like to append?\n");
-    scanf("%s\n", file_name);
+    scanf("%s", file_name);
     
     //send file name
     if((send_val = sendto(s_udp, file_name, sizeof(file_name), 0, (struct sockaddr*)&sin2, len)) < 0){
@@ -641,7 +641,7 @@ int append_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
         printf("Board does not exist, returning to main menu\n");
         return 0;
     }
-    
+   
     //find file and send size
     int file_size;
     FILE* fp;
@@ -682,6 +682,11 @@ int append_board(int s_udp, struct sockaddr_in sin2, int s_tcp){
     }
 
     fclose(fp);
+
+    if (confirm > 0){
+        printf("Board successfully appended to\n");
+    }
+
     return 0;
 
 }   
@@ -697,7 +702,7 @@ int download(int s_udp, struct sockaddr_in sin2, int s_tcp){
     bzero(buf, sizeof(buf));
 
     printf("What is the board you would like to download from?\n");
-    scanf("%s\n", buf);
+    scanf("%s", buf);
 
     //send name of the board to DL from
     if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){
@@ -707,9 +712,10 @@ int download(int s_udp, struct sockaddr_in sin2, int s_tcp){
    
     bzero(buf, sizeof(buf));
     printf("What is the name of the file you would like to download?\n");
-    scanf("%s\n", buf);
-    
-    if((send_val = sendto(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, len)) < 0){  
+    scanf("%s", file_name);
+   
+    //send name of the file 
+    if((send_val = sendto(s_udp, file_name, sizeof(file_name), 0, (struct sockaddr*)&sin2, len)) < 0){  
         printf("Error with sending name of file to server\n");
         return -1;
     } 
@@ -724,7 +730,7 @@ int download(int s_udp, struct sockaddr_in sin2, int s_tcp){
     file_size = ntohl(file_size);
     //if file_size is negative that means board doesnt exist
     if(file_size < 0){
-        printf("Board does not exist on server\n");
+        printf("Board or file does not exist on server\n");
         return 0;
     }
 
@@ -756,7 +762,10 @@ int download(int s_udp, struct sockaddr_in sin2, int s_tcp){
         }
 
 	    //write data to file
-    	fwrite(buf, sizeof(char), rec_bytes, f);
+    	int i;
+        for(i=0; i < rec_bytes; i++){
+            fwrite(&buf[i], sizeof(char), 1, f);
+        }
         rec_count++;       
         total_rec = total_rec + rec_bytes;
         
@@ -765,6 +774,7 @@ int download(int s_udp, struct sockaddr_in sin2, int s_tcp){
         }
     }
 
+    printf("Download successful\n");
     fclose(f);
     return 0;
 }
