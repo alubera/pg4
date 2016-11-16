@@ -565,29 +565,24 @@ int shut_down(int s_udp, struct sockaddr_in sin2, int s_tcp){
         return -1;
     }
 
-    short int confirm;
+    int confirm;
     //recieve confirmation int from server to see what next steps to take
     //if -1 this means failed and go back to prompt for user operation
 
-    if((rec_bytes = recvfrom(s_udp, &confirm, sizeof(short int), 0, (struct sockaddr*)&sin2, &len)) < 0){
+    if((rec_bytes = recvfrom(s_udp, &confirm, sizeof(int), 0, (struct sockaddr*)&sin2, &len)) < 0){
         printf("Error with receiving confirmation from server\n");
         return -1;
     }
-    
-    bzero(buf, sizeof(buf));
-    //recieve message from the server
-    if((rec_bytes = recvfrom(s_udp, buf, sizeof(buf), 0, (struct sockaddr*)&sin2, &len)) < 0){
-        printf("Error with receiving message from the server\n");
-        return -1;
-    }
-
-    printf("%s\n", buf);
+   
+    confirm = ntohl(confirm);  
 
     if(confirm == -1){
+        printf("Passwords don't match going back to main menu\n");  
         return 0;
     }
 
     if(confirm == 1){
+        printf("SHT successful closing all ports\n");
         close(s_udp);
         close(s_tcp);
         exit(0);
